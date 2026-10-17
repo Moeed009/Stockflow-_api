@@ -1,125 +1,121 @@
-Stockflow API
+# StockFlow API
 
-A backend API for inventory and stock management, built with Python. This project uses uv for dependency management and includes database migrations and automated tests.
+E-commerce and inventory management backend built with FastAPI, PostgreSQL (Supabase), and SQLAlchemy. Businesses manage products, stock, suppliers, and purchase orders. Customers place orders against live inventory.
 
-Features
-REST API for stock and inventory management
-Python dependency management with uv
-Database schema migrations using Alembic
-Automated tests with pytest
-Environment-based configuration
-Docker-related configuration support
-Tech Stack
-Language: Python
-Package Manager: uv
-Database Migrations: Alembic
-Testing: pytest
-API Framework: Update this section with the framework used in your project.
-Project Structure
-Stockflow_api/
-├── app/              # Application source code
-├── migrations/       # Database migrations
-├── tests/            # Automated tests
-├── .dockerignore     # Docker build exclusions
-├── .env.example      # Example environment variables
-├── .gitignore        # Git exclusions
-├── alembic.ini       # Alembic configuration
-├── pyproject.toml    # Project metadata and dependencies
-├── uv.lock           # Locked dependencies
-└── README.md         # Project documentation
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
 
-Prerequisites
+## Features
 
-Install the following before running the project:
+- **Two roles:** `BUSINESS` and `CUSTOMER`, enforced through reusable FastAPI dependencies (`require_business`, `require_customer`)
+- **Authentication:** Supabase Auth with JWT verification via JWKS; register, login, refresh, and logout endpoints
+- **Catalog:** categories and products with ACTIVE / INACTIVE status
+- **Inventory:** per-product stock with manual adjustments (negative stock is rejected)
+- **Orders:** customers order multiple items in one request; stock is deducted inside a single transaction using row-level locks (`SELECT ... FOR UPDATE`). Cancelling an order returns stock.
+- **Suppliers and purchase orders:** PENDING → ORDERED → RECEIVED / CANCELLED; receiving a purchase order increases stock
+- **Ownership checks:** businesses only see and change their own products, suppliers, and purchase orders; customers only see their own orders
 
-Python version supported by pyproject.toml
-uv
-The database required by your application, if applicable
-Git
+## Tech Stack
 
-Install uv by following the official guide:
+| Area | Tools |
+| --- | --- |
+| API | FastAPI, Pydantic v2, Uvicorn |
+| Database | PostgreSQL on Supabase, SQLAlchemy 2.0, Alembic |
+| Auth | Supabase Auth, python-jose (JWKS verification) |
+| Testing | Pytest, HTTPX (130+ tests) |
+| Tooling | uv, Docker, Docker Compose |
 
-https://docs.astral.sh/uv/getting-started/installation/
+## Project Structure
 
-Getting Started
-1. Clone the repository
-git clone https://github.com/YOUR_USERNAME/Stockflow_api.git
-cd Stockflow_api
+```
+app/
+├── core/          # settings, JWT/JWKS verification, Supabase clients
+├── db/            # engine and session
+├── dependencies/  # current user and role guards
+├── models/        # SQLAlchemy models and enums
+├── schemas/       # Pydantic request/response models
+├── services/      # business logic
+├── routers/       # API endpoints
+└── main.py
+migrations/        # Alembic migrations
+tests/             # Pytest suite
+```
 
+## API Overview
 
-Replace YOUR_USERNAME with your GitHub username.
+| Group | Prefix | Access |
+| --- | --- | --- |
+| Authentication | `/Auth` | Public (register, login, refresh), authenticated (logout) |
+| Users | `/me` | Authenticated |
+| Categories | `/categories` | Read: any user. Write: BUSINESS |
+| Products | `/products` | Read: any user. Write: BUSINESS (owner) |
+| Inventory | `/inventory` | BUSINESS (owner) |
+| Suppliers | `/suppliers` | BUSINESS |
+| Purchase orders | `/purchase-orders` | BUSINESS |
+| Orders | `/orders` | CUSTOMER places and views; BUSINESS updates status |
 
-2. Install dependencies
+Full interactive documentation is available at `/docs` (Swagger UI) once the server is running.
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- A Supabase project (database and Auth)
+
+### Setup
+
+```powershell
+git clone https://github.com/Moeed009/Stockflow-_api.git
+cd Stockflow-_api
 uv sync
-
-3. Configure environment variables
-
-Create your local .env file from the example:
-
-Windows PowerShell:
-
 Copy-Item .env.example .env
+```
 
+Fill in `.env`:
 
-Update .env with your actual database URL, secret keys, and other required settings.
+| Variable | Description |
+| --- | --- |
+| `DATABASE_URL` | PostgreSQL connection string |
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_ANON_KEY` | Supabase anon key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (server only, never expose) |
+| `SUPABASE_JWT_SECRET` | Supabase JWT secret |
+| `APP_NAME` | Application name shown in Swagger |
+| `ENVIRONMENT` | `development` or `production` |
 
-Never commit your real .env file or expose credentials.
+### Run
 
-4. Run database migrations
-
-If your application uses Alembic and its database is configured:
-
+```powershell
 uv run alembic upgrade head
-
-5. Start the development server
-
-If your application uses FastAPI and the application instance is app inside app/main.py, run:
-
 uv run uvicorn app.main:app --reload
+```
 
+Open http://127.0.0.1:8000/docs.
 
-If your entry point is different, adjust the module path to match your project.
+### Docker
 
-The default development server address is:
+```powershell
+docker compose -f app/docker-compose.yml up --build
+```
 
-http://127.0.0.1:8000
+## Running Tests
 
-For FastAPI applications, interactive API documentation is usually available at:
-
-http://127.0.0.1:8000/docs
-
-Running Tests
-
-Run the test suite with:
-
+```powershell
 uv run pytest
+```
 
-Database Migrations
+Tests run against an in-memory SQLite database with the Supabase client mocked, so no external services are needed.
 
-Create a new migration after updating your SQLAlchemy models:
+## Design Notes
 
-uv run alembic revision --autogenerate -m "describe your changes"
+- **Stock consistency:** order creation locks product and inventory rows, validates stock, deducts quantities, and commits as one transaction. Any failure rolls the whole order back.
+- **Price snapshots:** each order item stores `unit_price` and `subtotal` at purchase time, so later price changes do not alter past orders.
+- **Layering:** routers handle HTTP, services hold business rules, models and schemas stay separate.
 
+## License
 
-Apply migrations:
-
-uv run alembic upgrade head
-
-
-Review autogenerated migrations before applying them.
-
-Environment Variables
-
-Configure the environment variables required by your application in .env.
-
-Refer to .env.example for the available configuration keys. Actual variable names depend on the application implementation.
-
-Contributing
-Fork the repository.
-Create a feature branch.
-Make your changes and run tests.
-Commit your changes.
-Open a pull request.
-License
-
-No license has been specified yet. Add a license before distributing this project for reuse.
+Add a license before reuse (for example MIT).

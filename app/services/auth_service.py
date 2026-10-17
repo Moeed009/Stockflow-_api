@@ -68,7 +68,7 @@ def refresh_access_token(refresh_token: str) -> TokenResponse:
     try:
         result = supabase_anon.auth.refresh_session(refresh_token)
     except AuthApiError as e:
-        print("REFRESH FAILED:", repr(e), "| token received:", repr(refresh_token))  
+        logger.warning(f"Token refresh failed: {e.message}")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired refresh token")
 
     session = result.session
